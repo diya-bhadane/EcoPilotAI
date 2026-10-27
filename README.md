@@ -4,7 +4,7 @@
 
   **AI-Powered Sustainability Coach & Gamified Habit Tracker**
 
-  [Report Bug](https://github.com/Adii-45/EcoPilotAI/issues) · [Request Feature](https://github.com/Adii-45/EcoPilotAI/issues)
+  [Report Bug](github.com/diya-bhadane/EcoPilotAI/issues) · [Request Feature](github.com/diya-bhadane/EcoPilotAI/issues)
 
   ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
   ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
@@ -88,7 +88,7 @@ The AI-Powered Sustainability Recommendation Engine operates entirely client-sid
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Adii-45/EcoPilotAI.git
+   git clone https://github.com/diya-bhadane/EcoPilotAI
    cd EcoPilotAI
    ```
 
