@@ -1,0 +1,177 @@
+/* eslint-disable react-refresh/only-export-components */
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import type { User } from 'firebase/auth';
+import { auth, db } from '../services/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { useStore } from '../store/store';
+import type { AppState } from '../store/store';
+import type { Habit, Achievement, SimulationState, UserSettings, AIChatMessage, ActivityRecord, Notification as AppNotification } from '../types';
+
+interface AuthContextType {
+  currentUser: User | null;
+  loading: boolean;
+  logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType>({
+  currentUser: null,
+  loading: true,
+  logout: async () => {},
+});
+
+export const useAuth = () => useContext(AuthContext);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const updateUser = useStore(state => state.updateUser);
+
+  const logout = async () => {
+    await firebaseSignOut(auth);
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setLoading(true);
+      if (user) {
+        try {
+          
+          // Timeout helper (3.5 seconds) to prevent infinite database connection hangs
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Firestore fetch timeout')), 3500)
+          );
+
+          const fetchPromise = Promise.all([
+            getDoc(doc(db, 'users', user.uid)),
+            getDoc(doc(db, 'habits', user.uid)),
+            getDoc(doc(db, 'achievements', user.uid)),
+            getDoc(doc(db, 'simulations', user.uid)),
+            getDoc(doc(db, 'settings', user.uid)),
+            getDoc(doc(db, 'chatHistory', user.uid)),
+            getDoc(doc(db, 'activity', user.uid)),
+            getDoc(doc(db, 'notifications', user.uid))
+          ]);
+
+          // Race the Firestore fetch against our timeout
+          const [userDoc, habitsDoc, achDoc, simDoc, settingsDoc, chatDoc, activityDoc, notifDoc] = await Promise.race([
+            fetchPromise,
+            timeoutPromise
+          ]);
+
+          const storeUpdates: Partial<AppState> = {};
+
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            storeUpdates.user = {
+              id: user.uid,
+              name: userData.name || user.displayName || 'User',
+              email: user.email || '',
+              photoURL: userData.photoURL || undefined,
+              level: userData.level || 1,
+              xp: userData.xp || 0,
+              nextLevelXp: userData.nextLevelXp || 100,
+              streak: userData.streak || 0,
+              sustainabilityScore: userData.sustainabilityScore || 0,
+              totalCarbonSaved: userData.totalCarbonSaved || 0,
+              totalActions: userData.totalActions || 0,
+              achievementsEarned: userData.achievementsEarned || 0,
+              history: userData.history || [],
+              lastActiveDate: userData.lastActiveDate,
+              longestStreak: userData.longestStreak,
+              avatar: userData.avatar,
+            };
+          } else {
+            // Document doesn't exist yet (brand new registration)
+            storeUpdates.user = {
+              id: user.uid,
+              name: user.displayName || 'User',
+              email: user.email || '',
+              photoURL: user.photoURL || undefined,
+              level: 1,
+              xp: 0,
+              nextLevelXp: 100,
+              streak: 0,
+              sustainabilityScore: 0,
+              totalCarbonSaved: 0,
+              totalActions: 0,
+              achievementsEarned: 0,
+              history: [],
+            };
+          }
+
+          if (habitsDoc.exists()) {
+            const habitsData = habitsDoc.data();
+            storeUpdates.habits = (habitsData.active || []) as Habit[];
+            storeUpdates.dailyChallenges = (habitsData.daily || []) as Habit[];
+          }
+
+          if (achDoc.exists()) {
+            storeUpdates.achievements = (achDoc.data().data || []) as Achievement[];
+          }
+
+          if (simDoc.exists()) {
+            storeUpdates.simulation = simDoc.data() as SimulationState;
+          }
+
+          if (settingsDoc.exists()) {
+            storeUpdates.settings = settingsDoc.data() as UserSettings;
+          }
+
+          if (chatDoc.exists()) {
+            storeUpdates.aiMessages = (chatDoc.data().messages || []) as AIChatMessage[];
+          }
+
+          if (activityDoc.exists()) {
+            storeUpdates.activities = (activityDoc.data().data || []) as ActivityRecord[];
+          }
+
+          if (notifDoc.exists()) {
+            storeUpdates.notifications = (notifDoc.data().data || []) as AppNotification[];
+          }
+
+          // Apply state to Zustand
+          useStore.getState().setInitialData(storeUpdates);
+          
+          // Trigger daily reset check
+          await useStore.getState().checkDailyReset();
+        } catch (error) {
+          console.warn('Failed to load user profile from Firestore (falling back to local state):', error);
+          
+          // Fallback user state so the app still renders if Firestore is unreachable/offline
+          useStore.getState().setInitialData({
+            user: {
+              id: user.uid,
+              name: user.displayName || 'User',
+              email: user.email || '',
+              photoURL: user.photoURL || undefined,
+              level: 1,
+              xp: 0,
+              nextLevelXp: 100,
+              streak: 0,
+              sustainabilityScore: 0,
+              totalCarbonSaved: 0,
+              totalActions: 0,
+              achievementsEarned: 0,
+              history: [],
+            }
+          });
+        }
+      } else {
+        // Clear user state on sign out
+        useStore.getState().setInitialData({ user: null });
+      }
+      
+      setCurrentUser(user);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, [updateUser]);
+
+  return (
+    <AuthContext.Provider value={{ currentUser, loading, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
